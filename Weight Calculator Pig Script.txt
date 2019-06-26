@@ -1,0 +1,110 @@
+-- 1. load file
+WeightAnalysisFile = load '/user/ml_use_case2/Weight/test_file/Missing Value Test File_blank to NA_no header.csv' using PigStorage(',') as (RecID:chararray, Name:chararray, Zip:int, ClusterID:chararray);
+dump WeightAnalysisFile;
+
+-- 2. calculate Total_Pairs
+WeightAnalysisFile_group = GROUP WeightAnalysisFile ALL;
+dump WeightAnalysisFile_group;
+Pairs_Count = foreach WeightAnalysisFile_group Generate WeightAnalysisFile.ClusterID as ClusterID, COUNT(WeightAnalysisFile.ClusterID) as PairsCount;
+dump Pairs_Count;
+Total_Pairs_Count = foreach WeightAnalysisFile_group {Total_Pairs = Pairs_Count.PairsCount * (Pairs_Count.PairsCount - 1) / 2; Generate WeightAnalysisFile.ClusterID as ClusterID, Total_Pairs as Total_Pairs;};
+dump Total_Pairs_Count;
+
+-- 3. calculate EPairs, Total_EPairs
+EPairs_Count_a = FOREACH WeightAnalysisFile GENERATE ClusterID;
+dump EPairs_Count_a;
+EPairs_Count_a_group = GROUP EPairs_Count_a by ClusterID;
+dump EPairs_Count_a_group;
+EPairs_Count_b = FOREACH EPairs_Count_a_group GENERATE group as ClusterID, COUNT($1) as count;
+dump EPairs_Count_b;
+-- EPairs
+EPairs_Count_c = FOREACH EPairs_Count_b {EPairs = count * (count - 1) / 2; GENERATE ClusterID as ClusterID, EPairs as EPairs;};
+dump EPairs_Count_c;
+EPairs_Count_c_group = GROUP EPairs_Count_c ALL;
+dump EPairs_Count_c_group;
+-- Total_EPairs
+Total_EPairs_Count = foreach EPairs_Count_c_group Generate EPairs_Count_c.ClusterID as ClusterID, SUM(EPairs_Count_c.EPairs) as Total_EPairs;
+dump Total_EPairs_Count;
+
+-- 4. calculate AgreeE, Total_AgreeE
+AgreeE_Count_a_group = GROUP WeightAnalysisFile by (Name, ClusterID);
+dump AgreeE_Count_a_group;
+AgreeE_Count_b = FOREACH AgreeE_Count_a_group GENERATE group.Name as Name, group.ClusterID as ClusterID, COUNT($1) as AgreeECount_b;
+dump AgreeE_Count_b;
+AgreeE_Count_c = FOREACH AgreeE_Count_b {AgreeE_c = AgreeECount_b * (AgreeECount_b - 1) / 2; GENERATE Name as Name, ClusterID as ClusterID, AgreeE_c as AgreeE_c;};
+dump AgreeE_Count_c;
+AgreeE_Count_d = foreach AgreeE_Count_c generate Name as Name, AgreeE_c as AgreeE_c;
+dump AgreeE_Count_d;
+AgreeE_Distinct_Count = GROUP AgreeE_Count_d by Name;
+dump AgreeE_Distinct_Count;
+-- AgreeE
+AgreeE_Distinct = FOREACH AgreeE_Distinct_Count GENERATE group as Name, SUM(AgreeE_Count_d.AgreeE_c) as AgreeE;
+dump AgreeE_Distinct;
+AgreeE_Distinct_Count_group = GROUP AgreeE_Distinct all;
+dump AgreeE_Distinct_Count_group;
+-- Total_AgreeE
+Total_AgreeE_Count = foreach AgreeE_Distinct_Count_group Generate AgreeE_Distinct.Name as Name, SUM(AgreeE_Distinct.AgreeE) as Total_AgreeE;
+dump Total_AgreeE_Count;
+
+-- 5. calculate NameFrequency(NameFreq), NamePairs, number of NameFrequency(NoNameFreq), Total_NamePairs
+NamePairs_Count_a = FOREACH WeightAnalysisFile GENERATE Name;
+dump NamePairs_Count_a;
+NamePairs_Count_a_group = GROUP NamePairs_Count_a by Name;
+dump NamePairs_Count_a_group;
+-- NameFrequency(NameFreq)
+NameFreq_Count = FOREACH NamePairs_Count_a_group GENERATE group as Name, COUNT($1) as NameFreq;
+dump NameFreq_Count;
+NamePairs_Count = FOREACH NameFreq_Count {NamePairs = NameFreq * (NameFreq - 1) / 2; GENERATE Name as Name, NamePairs as NamePairs;};
+dump NamePairs_Count;
+NamePairs_Count_group = GROUP NamePairs_Count ALL;
+dump NamePairs_Count_group;
+-- Total_NamePairs
+Total_NamePairs_Count = FOREACH NamePairs_Count_group GENERATE NamePairs_Count.Name as Name, COUNT(NamePairs_Count.Name) as NoNameFreq, SUM(NamePairs_Count.NamePairs) as Total_NamePairs;
+dump Total_NamePairs_Count;
+
+-- 6. generate table_6 which contain Name, NameFreq, NoNameFreq, AgreeE, NamePairs, AgreeNE, Total_Pairs, Total_EPairs, Total_AgreeE, Total_NamePairs, Total_AgreeNE, Total_NEPairs, ProbE, ProbNE, Total_ProbE, Total_ProbNE, Ratio, AgreeWgt, CmpRatio, DisAgWgt, Total_Ratio, Total_AgreeWgt, Total_CmpPatio, Total_DisAgWgt
+Table_1 = join AgreeE_Distinct by Name, NameFreq_Count by Name, NamePairs_Count by Name;
+dump Table_1;
+Table_2 = FOREACH Table_1 GENERATE AgreeE_Distinct::Name as Name, NameFreq_Count::NameFreq as NameFreq, AgreeE_Distinct::AgreeE as AgreeE, NamePairs_Count::NamePairs as NamePairs;
+dump Table_2;
+Table_3 = FOREACH Table_2 {AgreeNE = NamePairs - AgreeE; GENERATE Name as Name, NameFreq as NameFreq, Total_NamePairs_Count.NoNameFreq as NoNameFreq, AgreeE as AgreeE, NamePairs as NamePairs, AgreeNE as AgreeNE, Total_Pairs_Count.Total_Pairs as Total_Pairs, Total_EPairs_Count.Total_EPairs as Total_EPairs, Total_AgreeE_Count.Total_AgreeE as Total_AgreeE, Total_NamePairs_Count.Total_NamePairs as Total_NamePairs;};
+dump Table_3;
+Table_4 = FOREACH Table_3 {Total_AgreeNE = Total_NamePairs - Total_AgreeE; Total_NEPairs = Total_Pairs - Total_EPairs; GENERATE Name as Name, NameFreq as NameFreq, NoNameFreq as NoNameFreq, AgreeE as AgreeE, NamePairs as NamePairs, AgreeNE as AgreeNE, Total_Pairs as Total_Pairs, Total_EPairs as Total_EPairs, Total_AgreeE as Total_AgreeE, Total_NamePairs as Total_NamePairs, Total_AgreeNE as Total_AgreeNE, Total_NEPairs as Total_NEPairs;};
+dump Table_4;
+Table_5 = FOREACH Table_4 {ProbE = (float)AgreeE/Total_EPairs; ProbNE = (float)AgreeNE/Total_NEPairs; Total_ProbE = (float)Total_AgreeE/Total_EPairs; Total_ProbNE = (float)Total_AgreeNE/Total_NEPairs; GENERATE Name as Name, NameFreq as NameFreq, NoNameFreq as NoNameFreq, AgreeE as AgreeE, NamePairs as NamePairs, AgreeNE as AgreeNE, Total_Pairs as Total_Pairs, Total_EPairs as Total_EPairs, Total_AgreeE as Total_AgreeE, Total_NamePairs as Total_NamePairs, Total_AgreeNE as Total_AgreeNE, Total_NEPairs as Total_NEPairs, (ProbE == 0.0 ? 0.001:ProbE) as ProbE, (ProbNE == 0.0 ? 0.001:ProbNE) as ProbNE, Total_ProbE as Total_ProbE, Total_ProbNE as Total_ProbNE;};
+dump Table_5;
+Table_6 = FOREACH Table_5 {Ratio = (float)ProbE/ProbNE; AgreeWgt = LOG10(Ratio)/LOG10(2); CmpRatio = (float)(1-ProbE)/(1-ProbNE); DisAgWgt = LOG10(CmpRatio)/LOG10(2); Total_Ratio = (float)Total_ProbE/Total_ProbNE; Total_AgreeWgt = LOG10(Total_Ratio)/LOG10(2); Total_CmpPatio = (float)(1-Total_ProbE)/(1-Total_ProbNE); Total_DisAgWgt = LOG10(Total_CmpPatio)/LOG10(2); GENERATE Name as Name, NameFreq as NameFreq, NoNameFreq as NoNameFreq, AgreeE as AgreeE, NamePairs as NamePairs, AgreeNE as AgreeNE, Total_Pairs as Total_Pairs, Total_EPairs as Total_EPairs, Total_AgreeE as Total_AgreeE, Total_NamePairs as Total_NamePairs, Total_AgreeNE as Total_AgreeNE, Total_NEPairs as Total_NEPairs, ProbE as ProbE, ProbNE as ProbNE, Total_ProbE as Total_ProbE, Total_ProbNE as Total_ProbNE, Ratio as Ratio, AgreeWgt as AgreeWgt, CmpRatio as CmpRatio, DisAgWgt as DisAgWgt, Total_Ratio as Total_Ratio, Total_AgreeWgt as Total_AgreeWgt, Total_CmpPatio as Total_CmpPatio, Total_DisAgWgt as Total_DisAgWgt;};
+dump Table_6;
+
+-- 7. calculate Total_Weight (Total_AgreeWgt, Total_DisAgWgt)
+Total_Weight_group = GROUP Table_6 all;
+dump Total_Weight_group;
+Total_Weight = FOREACH Total_Weight_group GENERATE Table_6.Name as Name, MAX(Table_6.Total_AgreeWgt) as Total_AgreeWgt, MAX(Table_6.Total_DisAgWgt) as Total_DisAgWgt;
+dump Total_Weight;
+
+-- 8. calculate MissingValue Weight (MissingAgreeWgt, MissingDisAgWgt)
+SPLIT Table_6 into MissingValue_Select if Name == 'NA', MissingValue_No if Name != 'NA'; 
+dump MissingValue_Select;
+dump MissingValue_No;
+MissingValue_Weight = FOREACH MissingValue_Select GENERATE Name as Name, AgreeWgt as MissingAgreeWgt, DisAgWgt as MissingDisAgWgt;
+dump MissingValue_Weight;
+
+-- 9. calculate Top Weight (AgreeWgt, DisAgWgt), Total Remaining Weight (Total_RemnAgreeWgt, Total_RemnDisAgWgt)
+Table_7 = ORDER MissingValue_No by NameFreq DESC, Name;
+dump Table_7;
+Top = LIMIT Table_7 ROUND(0.6 * (Total_NamePairs_Count.NoNameFreq - 1));
+dump Top;
+-- Top_Weight
+Top_Weight = FOREACH Top GENERATE Name as Name, AgreeWgt as AgreeWgt, DisAgWgt as DisAgWgt;
+dump Top_Weight;
+Table_8 = ORDER MissingValue_No by NameFreq, Name DESC;
+dump Table_8;
+Remaining_a = LIMIT Table_8 ((Total_NamePairs_Count.NoNameFreq - 1) - ROUND(0.6 * (Total_NamePairs_Count.NoNameFreq - 1)));
+dump Remaining_a;
+-- Total_Remaining_Weight
+Remaining_b = GROUP Remaining_a all;
+dump Remaining_b;
+Total_Remaining_Weight_a = FOREACH Remaining_b {Total_RemnAgreeE = SUM(Remaining_a.AgreeE); Total_RemnAgreeNE = SUM(Remaining_a.AgreeNE); Total_NEPairs = Total_Pairs_Count.Total_Pairs - Total_EPairs_Count.Total_EPairs; Total_RemnProbE = (float)Total_RemnAgreeE/Total_EPairs_Count.Total_EPairs; Total_RemnProbNE = (float)Total_RemnAgreeNE/Total_NEPairs; GENERATE Remaining_a.Name as Name, (Total_RemnProbE == 0.0 ? 0.001:Total_RemnProbE) as Total_RemnProbE, (Total_RemnProbNE == 0.0 ? 0.001:Total_RemnProbNE) as Total_RemnProbNE, MAX(Remaining_a.Total_DisAgWgt) as Total_RemnDisAgWgt;};
+dump Total_Remaining_Weight_a;
+Total_Remaining_Weight = FOREACH Total_Remaining_Weight_a {Total_RemnAgreeWgt = (float)LOG10(Total_RemnProbE/Total_RemnProbNE)/LOG10(2); GENERATE Name as Name, Total_RemnAgreeWgt as Total_RemnAgreeWgt, Total_RemnDisAgWgt as Total_RemnDisAgWgt;};
+dump Total_Remaining_Weight;
